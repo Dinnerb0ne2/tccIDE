@@ -1,53 +1,49 @@
 #include <compiler.h>
 #include <libtcc.h>
+#include <stdio.h>
+#include <string.h>
 
-static TCCState* s_tccState = NULL;
-static char s_lastError[4096] = {0};
+static char g_lastError[2048];
 
-static void ErrorCallback(void* opaque, const char* msg) {
-    strncpy(s_lastError, msg, sizeof(s_lastError) - 1);
+static void error_handler(void* opaque, const char* msg) {
+    strncpy(g_lastError, msg, sizeof(g_lastError) - 1);
+    g_lastError[sizeof(g_lastError) - 1] = '\0';
 }
 
-BOOL Compiler_Init(void) {
-    s_tccState = tcc_new();
-    if (!s_tccState) return FALSE;
-    
-    tcc_set_lib_path(s_tccState, "C:/tcc/lib");
-    tcc_set_output_type(s_tccState, TCC_OUTPUT_MEMORY);
-    tcc_add_sysinclude_path(s_tccState, "C:/tcc/include");
-    tcc_add_sysinclude_path(s_tccState, "C:/tcc/include/winapi");
-    tcc_set_error_func(s_tccState, NULL, ErrorCallback);
-    
-    return TRUE;
-}
-
-void Compiler_Cleanup(void) {
-    if (s_tccState) {
-        tcc_delete(s_tccState);
-        s_tccState = NULL;
-    }
-}
-
-BOOL Compiler_CompileAndRun(const char* code) {
-    if (!s_tccState) return FALSE;
-    
-    tcc_delete(s_tccState);
-    s_tccState = tcc_new();
-    Compiler_Init();
-    
-    if (tcc_compile_string(s_tccState, code) == -1) {
-        return FALSE;
+int Compiler_RunCode(const char* code, char* output, size_t output_size) {
+    TCCState* s = tcc_new();
+    if (!s) {
+        strcpy(g_lastError, "TCC init failed");
+        return -1;
     }
     
-    if (tcc_relocate(s_tccState, TCC_RELOCATE_AUTO) < 0) {
-        strncpy(s_lastError, "Relocation failed", sizeof(s_lastError) - 1);
-        return FALSE;
+    tcc_set_error_func(s, NULL, error_handler);
+    tcc_set_lib_path(s, "./tcc/lib");
+    tcc_set_output_type(s, TCC_OUTPUT_MEMORY);
+    
+    tcc_add_sysinclude_path(s, "./tcc/include");
+    tcc_add_sysinclude_path(s, "./tcc/include/winapi");
+    tcc_add_library(s, "user32");
+    tcc_add_library(s, "kernel32");
+    
+    if (tcc_compile_string(s, code) != 0) {
+        tcc_delete(s);
+        return -1;
     }
     
-    tcc_run(s_tccState, 0, NULL);
-    return TRUE;
+    if (tcc_relocate(s, TCC_RELOCATE_AUTO) < 0) {
+        strcpy(g_lastError, "Relocation failed");
+        tcc_delete(s);
+        return -1;
+    }
+    
+    int ret = tcc_run(s, 0, NULL);
+    snprintf(output, output_size, "Exit code: %d", ret);
+    
+    tcc_delete(s);
+    return 0;
 }
 
 const char* Compiler_GetLastError(void) {
-    return s_lastError;
+    return g_lastError;
 }

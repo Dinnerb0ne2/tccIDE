@@ -1,183 +1,153 @@
 #include <ide.h>
+#include <resources.h>
+#include <fileio.h>
 #include <editor.h>
 #include <compiler.h>
-#include <file_io.h>
-#include <output.h>
 
-IDE_STATE g_ide = {0};
-HINSTANCE g_hInstance;
+// Global variables
+HINSTANCE g_hInst;
+HWND g_hMainWnd;
+HWND g_hEditor;
+HWND g_hOutput;
+HWND g_hStatusBar;
+WCHAR g_szFilePath[MAX_PATH] = L"";
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-                   LPSTR lpCmdLine, int nCmdShow) {
-    g_hInstance = hInstance;
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
+    g_hInst = hInstance;
     
-    LoadLibrary("riched20.dll"); // Load RichEdit library
+    // Initialize common controls
+    INITCOMMONCONTROLSEX icex = {sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES};
+    InitCommonControlsEx(&icex);
     
-    if (!Compiler_Init()) {
-        MessageBox(NULL, "Failed to initialize TCC", "Error", MB_OK | MB_ICONERROR);
+    // Register window class
+    WNDCLASSEXW wc = {sizeof(WNDCLASSEXW), CS_HREDRAW | CS_VREDRAW, MainWndProc,
+                      0, 0, hInstance, LoadIcon(NULL, IDI_APPLICATION),
+                      LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_WINDOW + 1),
+                      NULL, IDE_CLASS_NAME, LoadIcon(NULL, IDI_APPLICATION)};
+                      
+    if (!RegisterClassExW(&wc)) {
+        MessageBoxW(NULL, L"Window registration failed", L"Error", MB_OK | MB_ICONERROR);
         return 1;
     }
     
-    WNDCLASSEX wc = {0};
-    wc.cbSize = sizeof(WNDCLASSEX);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = MainWndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    wc.lpszClassName = IDE_CLASS;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+    // Create main window
+    g_hMainWnd = CreateWindowExW(0, IDE_CLASS_NAME, L"C IDE - TCC Based",
+                                 WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                                 CW_USEDEFAULT, CW_USEDEFAULT, 1000, 700,
+                                 NULL, NULL, hInstance, NULL);
+                                 
+    if (!g_hMainWnd) return 1;
     
-    if (!RegisterClassEx(&wc)) {
-        MessageBox(NULL, "Window registration failed", "Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
+    ShowWindow(g_hMainWnd, nCmdShow);
+    UpdateWindow(g_hMainWnd);
     
-    g_ide.hwndMain = CreateWindowEx(
-        WS_EX_CLIENTEDGE,
-        IDE_CLASS,
-        IDE_TITLE,
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        IDE_WIDTH, IDE_HEIGHT,
-        NULL, NULL,
-        hInstance,
-        NULL
-    );
-    
-    if (!g_ide.hwndMain) {
-        MessageBox(NULL, "Window creation failed", "Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-    
-    ShowWindow(g_ide.hwndMain, nCmdShow);
-    UpdateWindow(g_ide.hwndMain);
-    
+    // Message loop
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
     
-    Compiler_Cleanup();
     return (int)msg.wParam;
 }
 
-void CreateMenus(HWND hwnd) {
-    HMENU hMenu = CreateMenu();
-    HMENU hFileMenu = CreatePopupMenu();
-    HMENU hBuildMenu = CreatePopupMenu();
-    
-    AppendMenu(hMenu, MF_STRING | MF_POPUP, (UINT_PTR)hFileMenu, "&File");
-    AppendMenu(hMenu, MF_STRING | MF_POPUP, (UINT_PTR)hBuildMenu, "&Build");
-    
-    AppendMenu(hFileMenu, MF_STRING, IDM_FILE_NEW, "&New\tCtrl+N");
-    AppendMenu(hFileMenu, MF_STRING, IDM_FILE_OPEN, "&Open\tCtrl+O");
-    AppendMenu(hFileMenu, MF_STRING, IDM_FILE_SAVE, "&Save\tCtrl+S");
-    AppendMenu(hFileMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hFileMenu, MF_STRING, IDM_FILE_EXIT, "E&xit");
-    
-    AppendMenu(hBuildMenu, MF_STRING, IDM_BUILD_COMPILE, "&Compile");
-    AppendMenu(hBuildMenu, MF_STRING, IDM_COMPILE_RUN, "&Run\tF5");
-    
-    SetMenu(hwnd, hMenu);
-}
-
-void CreateLayout(HWND hwnd) {
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    
-    int editorHeight = (rc.bottom - rc.top) * 7 / 10;
-    
-    if (!Editor_Init(hwnd)) {
-        MessageBox(hwnd, "Failed to create editor", "Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-    
-    if (!Output_Init(hwnd)) {
-        MessageBox(hwnd, "Failed to create output window", "Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-    
-    MoveWindow(g_ide.hwndEditor, 0, 0, rc.right, editorHeight, TRUE);
-    MoveWindow(g_ide.hwndOutput, 0, editorHeight, rc.right, rc.bottom - editorHeight, TRUE);
-}
-
-LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-        case WM_CREATE:
-            CreateMenus(hwnd);
-            CreateLayout(hwnd);
+        case WM_CREATE: {
+            extern void UI_CreateMenu(HWND);
+            extern void UI_CreateStatusBar(HWND);
+            extern void UI_CreateLayout(HWND);
+            
+            UI_CreateMenu(hWnd);
+            UI_CreateStatusBar(hWnd);
+            UI_CreateLayout(hWnd);
+            SetWindowTextW(g_hStatusBar, L"Ready");
             return 0;
+        }
         
-        case WM_SIZE:
-            if (g_ide.hwndEditor && g_ide.hwndOutput) {
-                int height = HIWORD(lParam);
-                int editorHeight = height * 7 / 10;
-                MoveWindow(g_ide.hwndEditor, 0, 0, LOWORD(lParam), editorHeight, TRUE);
-                MoveWindow(g_ide.hwndOutput, 0, editorHeight, LOWORD(lParam), height - editorHeight, TRUE);
-            }
+        case WM_SIZE: {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            int statusH = 20, outputH = 150;
+            
+            SetWindowPos(g_hEditor, NULL, 0, 0, rc.right, rc.bottom - statusH - outputH, SWP_NOZORDER);
+            SetWindowPos(g_hOutput, NULL, 0, rc.bottom - statusH - outputH, rc.right, outputH, SWP_NOZORDER);
+            SetWindowPos(g_hStatusBar, NULL, 0, rc.bottom - statusH, rc.right, statusH, SWP_NOZORDER);
             return 0;
+        }
         
-        case WM_COMMAND:
+        case WM_COMMAND: {
             switch (LOWORD(wParam)) {
                 case IDM_FILE_NEW:
-                    Editor_Clear();
-                    strcpy(g_ide.currentFile, "");
-                    g_ide.isFileModified = FALSE;
-                    return 0;
-                
+                    FileIO_New();
+                    break;
+                    
                 case IDM_FILE_OPEN: {
-                    char buffer[65536] = {0};
-                    if (FileIO_Open(hwnd, buffer, sizeof(buffer))) {
-                        Editor_SetText(buffer);
-                        g_ide.isFileModified = FALSE;
+                    WCHAR path[MAX_PATH];
+                    if (FileIO_Open(hWnd, path)) {
+                        wcscpy(g_szFilePath, path);
+                        WCHAR title[MAX_PATH + 20];
+                        wsprintfW(title, L"C IDE - %s", path);
+                        SetWindowTextW(hWnd, title);
                     }
-                    return 0;
+                    break;
                 }
                 
                 case IDM_FILE_SAVE:
-                    if (strlen(g_ide.currentFile) == 0) {
-                        FileIO_SaveAs(hwnd, Editor_GetText(), g_ide.currentFile);
-                    } else {
-                        FileIO_Save(hwnd, Editor_GetText(), g_ide.currentFile);
-                    }
-                    g_ide.isFileModified = FALSE;
-                    return 0;
-                
-                case IDM_COMPILE_RUN: {
-                    char* code = Editor_GetText();
-                    Output_Clear();
-                    if (!Compiler_CompileAndRun(code)) {
-                        Output_Append(Compiler_GetLastError());
-                    }
-                    free(code);
-                    return 0;
-                }
-                
+                    if (wcslen(g_szFilePath))
+                        FileIO_Save(hWnd, g_hEditor, g_szFilePath);
+                    else
+                        FileIO_SaveAs(hWnd, g_hEditor, g_szFilePath);
+                    break;
+                    
+                case IDM_FILE_SAVEAS:
+                    FileIO_SaveAs(hWnd, g_hEditor, g_szFilePath);
+                    break;
+                    
                 case IDM_FILE_EXIT:
-                    PostQuitMessage(0);
-                    return 0;
-            }
-            break;
-        
-        case WM_CLOSE:
-            if (g_ide.isFileModified) {
-                int result = MessageBox(hwnd, "Save changes before closing?", "Confirm", MB_YESNOCANCEL | MB_ICONQUESTION);
-                if (result == IDYES) {
-                    SendMessage(hwnd, WM_COMMAND, IDM_FILE_SAVE, 0);
-                } else if (result == IDCANCEL) {
-                    return 0;
+                    PostMessage(hWnd, WM_CLOSE, 0, 0);
+                    break;
+                    
+                case IDM_EDIT_CUT:
+                    Editor_Cut(g_hEditor);
+                    break;
+                    
+                case IDM_EDIT_COPY:
+                    Editor_Copy(g_hEditor);
+                    break;
+                    
+                case IDM_EDIT_PASTE:
+                    Editor_Paste(g_hEditor);
+                    break;
+                    
+                case IDM_EDIT_UNDO:
+                    Editor_Undo(g_hEditor);
+                    break;
+                    
+                case IDM_COMPILE_RUN: {
+                    SetWindowTextW(g_hOutput, L"");
+                    char* code = Editor_GetText(g_hEditor);
+                    char result[8192] = {0};
+                    
+                    if (Compiler_RunCode(code, result, sizeof(result)) == 0) {
+                        SetWindowTextA(g_hOutput, result);
+                        SetWindowTextW(g_hStatusBar, L"Success");
+                    } else {
+                        SetWindowTextA(g_hOutput, Compiler_GetLastError());
+                        SetWindowTextW(g_hStatusBar, L"Error");
+                    }
+                    
+                    free(code);
+                    break;
                 }
             }
-            DestroyWindow(hwnd);
             return 0;
+        }
         
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
     }
     
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    return DefWindowProc(hWnd, msg, wParam, lParam);
 }

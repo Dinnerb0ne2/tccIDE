@@ -1,66 +1,41 @@
 #include <editor.h>
-#include <ide.h>
+#include <resources.h>
 
-static HWND s_hwndEditor = NULL;
-
-BOOL Editor_Init(HWND parent) {
-    LoadLibrary("riched20.dll");
-    
-    s_hwndEditor = CreateWindowEx(
-        WS_EX_CLIENTEDGE,
-        "RichEdit20A",
-        "",
-        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
-        ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_NOHIDESEL,
-        0, 0, 100, 100,
-        parent,
-        NULL,
-        g_hInstance,
-        NULL
-    );
-    
-    if (s_hwndEditor) {
-        Editor_SetFont();
-        g_ide.hwndEditor = s_hwndEditor;
-        return TRUE;
-    }
-    return FALSE;
+HWND Editor_Create(HWND hParent, int x, int y, int width, int height) {
+    return CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
+                           WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_WANTRETURN |
+                           ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL,
+                           x, y, width, height, hParent, (HMENU)IDC_EDITOR,
+                           GetModuleHandle(NULL), NULL);
 }
 
-HWND Editor_GetHandle(void) {
-    return s_hwndEditor;
+void Editor_SetText(HWND hEditor, const char* text) {
+    SetWindowTextA(hEditor, text);
 }
 
-void Editor_SetText(const char* text) {
-    SetWindowText(s_hwndEditor, text);
+char* Editor_GetText(HWND hEditor) {
+    int len = GetWindowTextLengthA(hEditor);
+    char* buf = (char*)malloc(len + 1);
+    if (buf) GetWindowTextA(hEditor, buf, len + 1);
+    return buf;
 }
 
-char* Editor_GetText(void) {
-    int length = GetWindowTextLength(s_hwndEditor);
-    char* buffer = malloc(length + 1);
-    if (buffer) {
-        GetWindowText(s_hwndEditor, buffer, length + 1);
-    }
-    return buffer;
+void Editor_Clear(HWND hEditor) {
+    SetWindowTextA(hEditor, "");
 }
 
-void Editor_Clear(void) {
-    SetWindowText(s_hwndEditor, "");
+void Editor_Cut(HWND hEditor) {
+    SendMessage(hEditor, WM_CUT, 0, 0);
 }
 
-void Editor_SetModified(BOOL modified) {
-    g_ide.isFileModified = modified;
+void Editor_Copy(HWND hEditor) {
+    SendMessage(hEditor, WM_COPY, 0, 0);
 }
 
-BOOL Editor_GetModified(void) {
-    return g_ide.isFileModified;
+void Editor_Paste(HWND hEditor) {
+    SendMessage(hEditor, WM_PASTE, 0, 0);
 }
 
-void Editor_SetFont(void) {
-    CHARFORMATA cf = {0};
-    cf.cbSize = sizeof(cf);
-    cf.dwMask = CFM_FACE | CFM_SIZE;
-    cf.yHeight = 180; // 9pt
-    strcpy(cf.szFaceName, "Consolas");
-    SendMessage(s_hwndEditor, EM_SETCHARFORMAT, SCF_ALL, (LPARAM)&cf);
+void Editor_Undo(HWND hEditor) {
+    SendMessage(hEditor, WM_UNDO, 0, 0);
 }
